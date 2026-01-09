@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from PIL import Image
 import pytesseract
 
+pytesseract.pytesseract.tesseract_cmd = "/opt/homebrew/bin/tesseract"
+
 # ------------------ SETUP ------------------
 load_dotenv()
 
