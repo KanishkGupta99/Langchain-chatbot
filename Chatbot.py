@@ -60,7 +60,8 @@ template=PromptTemplate(
 
         Answer based strictly on the OCR text.
         If no OCR text is there, anwer query as best as possible.
-"""
+""",
+    input_variables=["ocr_text", "query"]
 )
 if query:
     final_prompt = template.format(
