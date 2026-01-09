@@ -1,7 +1,10 @@
 import streamlit as st
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
+from PIL import Image
+import pytesseract
 
 # ------------------ SETUP ------------------
 load_dotenv()
@@ -17,7 +20,7 @@ parser = StrOutputParser()
 
 # ------------------ UI ------------------
 st.title("🧠 General Question Answering Chatbot")
-st.markdown("Ask anything and get instant answers from Gemini.")
+st.markdown("Ask anything or upload an image and ask questions about it.")
 st.divider()
 
 # ------------------ CHAT STATE ------------------
@@ -29,20 +32,51 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ------------------ INPUT ------------------
+# ------------------ INPUTS ------------------
 query = st.chat_input("Ask your question here...")
+image = st.file_uploader(
+    "Upload an image (optional – OCR will be used)",
+    type=["png", "jpg", "jpeg"]
+)
 
+# ------------------ OCR ------------------
+ocr_text = ""
+if image:
+    img = Image.open(image)
+    ocr_text = pytesseract.image_to_string(img)
+
+# ------------------ PROCESS QUERY ------------------
+template=PromptTemplate(
+    template="""
+        You are given text extracted from an image using OCR.
+
+        OCR TEXT:
+        {ocr_text}
+
+        USER QUESTION:
+        {query}
+
+        Answer based strictly on the OCR text.
+        If no OCR text is there, anwer query as best as possible.
+"""
+)
 if query:
-    # Show user message
+    final_prompt = template.format(
+        ocr_text=ocr_text,
+        query=query
+    )
+
+    # Save user message
     st.session_state.messages.append(
         {"role": "user", "content": query}
     )
 
     st.chat_message("user").markdown(query)
 
+    # Generate response
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = model.invoke(query)
+            response = model.invoke(final_prompt)
             result = parser.parse(response.content)
             st.markdown(result)
 

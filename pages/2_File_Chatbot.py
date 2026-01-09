@@ -56,7 +56,7 @@ st.sidebar.markdown("Upload a PDF and ask questions from its content.")
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload PDF",
-    type=["pdf"],
+    type="pdf",
 )
 
 # ------------------ MAIN UI ------------------

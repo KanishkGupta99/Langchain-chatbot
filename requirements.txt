@@ -35,3 +35,4 @@ unstructured-inference
 pdfminer.six
 youtube-transcript-api
 streamlit
+pytesseract
