@@ -1,20 +1,7 @@
 import streamlit as st
-import re
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.prompts import PromptTemplate
-from youtube_transcript_api import YouTubeTranscriptApi
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_core.runnables import (
-    RunnableSequence,
-    RunnableParallel,
-    RunnablePassthrough,
-    RunnableLambda,
-)
-from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv
+from backend.yt_chatbot_logic import chatbot
+from langchain_core.messages import HumanMessage
 
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(
@@ -23,49 +10,7 @@ st.set_page_config(
     layout="wide",
 )
 
-load_dotenv()
-
-# ------------------ MODELS ------------------
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-llm_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-parser = StrOutputParser()
-
-vector_store_cache = {}
-
-# ------------------ HELPERS ------------------
-def extract_video_id(url):
-    pattern = r"(?:v=|\/|be\/)([0-9A-Za-z_-]{11})"
-    match = re.search(pattern, url)
-    return match.group(1) if match else None
-
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
-def get_vector_store(video_id,lang):
-    if video_id in vector_store_cache:
-        st.sidebar.success("Using cached transcript")
-        return vector_store_cache[video_id]
-
-    with st.spinner("Fetching transcript & building index..."):
-        yt_api = YouTubeTranscriptApi()
-        try:
-            transcript_list = yt_api.fetch(video_id=video_id, languages=[lang])
-            transcript = " ".join(chunk.text for chunk in transcript_list)
-        
-        except:
-            st.sidebar.error("Transcript not available for this video in the selected language.")
-            st.stop()
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200
-        )
-        chunks = splitter.create_documents([transcript])
-
-        vector_store = FAISS.from_documents(chunks, embedding_model)
-        vector_store_cache[video_id] = vector_store
-        return vector_store
+CONFIG={'configurable':{'thread_id':'1'}}
 
 # ------------------ SIDEBAR ------------------
 st.sidebar.title("🎥 YouTube Q&A")
@@ -104,42 +49,6 @@ if not url:
     st.info("👈 Enter a YouTube URL from the sidebar to begin")
     st.stop()
 
-video_id = extract_video_id(url)
-if not video_id:
-    st.error("❌ Invalid YouTube URL")
-    st.stop()
-
-vector_store = get_vector_store(video_id,lang)
-retriever = vector_store.as_retriever(
-    search_type="similarity", search_kwargs={"k": 3}
-)
-
-template = PromptTemplate(
-    template="""
-You are a helpful assistant.
-Answer ONLY from the provided transcript context.
-If the context is insufficient, say "I don't know".
-
-Context:
-{context}
-
-Question:
-{question}
-""",
-    input_variables=["context", "question"],
-)
-
-parallel_chain = RunnableParallel(
-    {
-        "context": RunnableSequence(retriever, RunnableLambda(format_docs)),
-        "question": RunnablePassthrough(),
-    }
-)
-
-chain = RunnableSequence(
-    parallel_chain, template, llm_model, StrOutputParser()
-)
-
 # ------------------ CHAT UI ------------------
 if "yt_messages" not in st.session_state:
     st.session_state.yt_messages = []
@@ -159,9 +68,15 @@ if query:
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            result = chain.invoke(query)
-            st.markdown(result)
+            result=st.write_stream(
+                message_chunk.content for message_chunk, metadata in chatbot.stream(
+                    {"messages":[HumanMessage(content=query)],"youtube_url":url,"lang":lang}, 
+                    config=CONFIG,
+                    stream_mode="messages"
+                )
+            )
 
+    st.text(chatbot.get_state(config=CONFIG))
     st.session_state.yt_messages.append(
         {"role": "assistant", "content": result}
     )

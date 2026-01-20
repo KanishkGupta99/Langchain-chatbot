@@ -1,5 +1,6 @@
 # LangChain Core
 langchain
+langgraph
 langchain-core
 langchain-community
 langchain-text-splitters
@@ -36,3 +37,4 @@ pdfminer.six
 youtube-transcript-api
 streamlit
 pytesseract
+langgraph-checkpoint-sqlite

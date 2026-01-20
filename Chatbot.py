@@ -1,10 +1,54 @@
+import uuid
 import streamlit as st
+from langchain_core.messages import HumanMessage
+from backend.simple_chatbot_logic import chatbot
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
+from langchain_core.prompts import PromptTemplate
+
+llm=ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+
+class thread_title(BaseModel):
+    title:str=Field(description="title of the thread")
+
+parser=PydanticOutputParser(pydantic_object=thread_title)
+
+# ------------------ UTILITY FUNCTIONS ------------------
+
+def generate_thread_id():
+    return uuid.uuid4()
+
+def reset_chat():
+    thread_id = generate_thread_id()
+    st.session_state['thread_id'] = thread_id
+    add_thread(thread_id)
+    st.session_state['messages'] = []
+
+def add_thread(thread_id):
+    if thread_id not in st.session_state['chat_threads']:
+        st.session_state['chat_threads'][thread_id]="New Chat"
+
+def load_conversation(thread_id):
+    state = chatbot.get_state({'configurable': {'thread_id': thread_id}})
+    if state:
+        return state.values['messages']
+
+def get_title(query):
+    template=PromptTemplate(
+        template="Write a 3-4 word appropriate title for this query-{query} \n {format_instructions}",
+        input_variables=['query'],
+        partial_variables={'format_instructions':parser.get_format_instructions}
+    )
+
+    chain=template | llm | parser
+    result=chain.invoke({'query':query})
+    return result.title
+
+def update_thread_title(thread_id,title):
+    st.session_state['chat_threads'][thread_id]=title
 
 # ------------------ SETUP ------------------
-load_dotenv()
 
 st.set_page_config(
     page_title="General Chatbot",
@@ -12,41 +56,76 @@ st.set_page_config(
     layout="wide",
 )
 
-model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-parser = StrOutputParser()
+# ------------------ CHAT STATE ------------------
+
+if "messages" not in st.session_state:
+    st.session_state['messages'] = []
+
+if "thread_id" not in st.session_state:
+    st.session_state['thread_id'] = generate_thread_id()
+
+if "chat_threads" not in st.session_state:
+    st.session_state['chat_threads'] = {}
+
+add_thread(st.session_state['thread_id'])
+
+# ------------------ SIDEBAR ------------------
+
+if st.sidebar.button("New Chat"):
+    if len(st.session_state["messages"]) > 0:
+        reset_chat()
+
+st.sidebar.header("My conversations")
+
+# Display historical threads
+for thread_id,title in list(st.session_state["chat_threads"].items())[::-1]:
+    if st.sidebar.button(str(title), key=str(thread_id)):
+        st.session_state['thread_id'] = thread_id
+        messages = load_conversation(thread_id)
+
+        temp_messages = []
+        for message in messages:
+            role = "user" if isinstance(message, HumanMessage) else "assistant"
+            temp_messages.append({"role": role, "content": message.content})
+
+        st.session_state['messages'] = temp_messages
 
 # ------------------ UI ------------------
+
 st.title("🧠 General Question Answering Chatbot")
 st.markdown("Ask anything and get instant answers from Gemini.")
 st.divider()
 
-# ------------------ CHAT STATE ------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 # ------------------ DISPLAY CHAT ------------------
-for msg in st.session_state.messages:
+
+for msg in st.session_state["messages"]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 # ------------------ INPUT ------------------
+
 query = st.chat_input("Ask your question here...")
+CONFIG = {'configurable': {'thread_id': st.session_state['thread_id']}}
 
 if query:
     # Show user message
-    st.session_state.messages.append(
-        {"role": "user", "content": query}
-    )
-
+    st.session_state["messages"].append({"role": "user", "content": query})
+    if len(st.session_state["messages"])==1:
+        title=get_title(query)
+        update_thread_title(st.session_state["thread_id"],title)
+        
     st.chat_message("user").markdown(query)
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = model.invoke(query)
-            result = parser.parse(response.content)
-            st.markdown(result)
+            # Stream the response
+            result = st.write_stream(
+                message_chunk.content for message_chunk, metadata in chatbot.stream(
+                    {"messages": [HumanMessage(content=query)]},
+                    config=CONFIG,
+                    stream_mode="messages"
+                )
+            )
 
     # Save assistant message
-    st.session_state.messages.append(
-        {"role": "assistant", "content": result}
-    )
+    st.session_state["messages"].append({"role": "assistant", "content": result})
