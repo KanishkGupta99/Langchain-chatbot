@@ -1,7 +1,7 @@
 import uuid
 import streamlit as st
 from langchain_core.messages import HumanMessage
-from backend.simple_chatbot_logic import chatbot
+from backend.simple_chatbot_logic import chatbot, upsert_thread, fetch_threads
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -17,26 +17,29 @@ parser=PydanticOutputParser(pydantic_object=thread_title)
 # ------------------ UTILITY FUNCTIONS ------------------
 
 def generate_thread_id():
-    return uuid.uuid4()
+    return str(uuid.uuid4())
 
 def reset_chat():
     thread_id = generate_thread_id()
     st.session_state['thread_id'] = thread_id
-    add_thread(thread_id)
     st.session_state['messages'] = []
 
 def add_thread(thread_id):
+    thread_id = str(thread_id)
     if thread_id not in st.session_state['chat_threads']:
         st.session_state['chat_threads'][thread_id]="New Chat"
+    upsert_thread(thread_id=thread_id,title=st.session_state['chat_threads'][thread_id])
 
 def load_conversation(thread_id):
+    thread_id = str(thread_id)
     state = chatbot.get_state({'configurable': {'thread_id': thread_id}})
     if state:
+        st.session_state['chat_threads'][thread_id]=state.values.get('thread_title',"New Chat")
         return state.values['messages']
 
 def get_title(query):
     template=PromptTemplate(
-        template="Write a 3-4 word appropriate title for this query-{query} \n {format_instructions}",
+        template="Write a 3-4 word generalised title for this query-{query} \n {format_instructions}, avoid using punctation symbols",
         input_variables=['query'],
         partial_variables={'format_instructions':parser.get_format_instructions}
     )
@@ -46,7 +49,9 @@ def get_title(query):
     return result.title
 
 def update_thread_title(thread_id,title):
+    thread_id = str(thread_id)
     st.session_state['chat_threads'][thread_id]=title
+    upsert_thread(thread_id=thread_id,title=title)
 
 # ------------------ SETUP ------------------
 
@@ -65,9 +70,11 @@ if "thread_id" not in st.session_state:
     st.session_state['thread_id'] = generate_thread_id()
 
 if "chat_threads" not in st.session_state:
-    st.session_state['chat_threads'] = {}
-
-add_thread(st.session_state['thread_id'])
+    st.session_state['chat_threads'] = fetch_threads()
+else:
+    # Normalize existing keys to strings, then merge persisted threads
+    st.session_state['chat_threads'] = {str(k):v for k,v in st.session_state['chat_threads'].items()}
+    st.session_state['chat_threads'] |= fetch_threads()
 
 # ------------------ SIDEBAR ------------------
 
@@ -111,6 +118,8 @@ if query:
     # Show user message
     st.session_state["messages"].append({"role": "user", "content": query})
     if len(st.session_state["messages"])==1:
+        # First message -> create thread entry
+        add_thread(st.session_state["thread_id"])
         title=get_title(query)
         update_thread_title(st.session_state["thread_id"],title)
         
@@ -121,7 +130,10 @@ if query:
             # Stream the response
             result = st.write_stream(
                 message_chunk.content for message_chunk, metadata in chatbot.stream(
-                    {"messages": [HumanMessage(content=query)]},
+                    {
+                        "messages": [HumanMessage(content=query)],
+                        "thread_title": st.session_state["chat_threads"].get(st.session_state["thread_id"],"New Chat")
+                    },
                     config=CONFIG,
                     stream_mode="messages"
                 )

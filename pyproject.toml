@@ -23,5 +23,5 @@ dependencies = [
     "transformers>=4.57.3",
     "unstructured>=0.18.24",
     "unstructured-inference>=0.2.4",
-    "youtube-transcript-api>=1.2.3",
+    "youtube-transcript-api>=1.2.3"
 ]

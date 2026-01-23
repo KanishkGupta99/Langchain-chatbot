@@ -38,3 +38,8 @@ youtube-transcript-api
 streamlit
 pytesseract
 langgraph-checkpoint-sqlite
+pymongo
+langgraph-checkpoint-mongodb
+datetime
+requests
+beautifulsoup4
