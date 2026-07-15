@@ -37,6 +37,7 @@ pdfminer.six
 youtube-transcript-api
 streamlit
 pytesseract
+Pillow
 langgraph-checkpoint-sqlite
 pymongo
 langgraph-checkpoint-mongodb

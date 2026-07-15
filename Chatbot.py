@@ -1,5 +1,7 @@
 import uuid
+import base64
 import streamlit as st
+import streamlit.components.v1 as components
 from langchain_core.messages import HumanMessage
 from backend.simple_chatbot_logic import chatbot, upsert_thread, fetch_threads
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -103,6 +105,44 @@ st.title("🧠 General Question Answering Chatbot")
 st.markdown("Ask anything and get instant answers from Gemini.")
 st.divider()
 
+# Image upload for OCR-enabled Q&A
+uploaded_image = st.file_uploader("Upload an image to ask questions from (optional)", type=["png", "jpg", "jpeg", "bmp", "tiff"])
+
+# Paste area: allow users to paste an image (Cmd/Ctrl+V) into the box below.
+# The embedded HTML captures pasted images and returns a data URL to Streamlit.
+if "pasted_image_dataurl" not in st.session_state:
+        st.session_state["pasted_image_dataurl"] = None
+
+paste_html = """
+<div id="paste-area" contenteditable="true" style="min-height:60px;border:1px solid #ddd;padding:8px;">
+    Paste an image here (Ctrl/Cmd+V)
+</div>
+<script>
+async function handlePaste(e){
+    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (const item of items){
+        if (item.type.indexOf('image') !== -1){
+            const blob = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = function(evt){
+                const dataUrl = evt.target.result;
+                // Send to Streamlit component return value
+                const msg = {isStreamlitMessage: true, type: 'streamlit:setComponentValue', value: dataUrl};
+                window.parent.postMessage(msg, '*');
+            };
+            reader.readAsDataURL(blob);
+        }
+    }
+}
+document.getElementById('paste-area').addEventListener('paste', handlePaste);
+</script>
+"""
+
+pasted = components.html(paste_html, height=100)
+if pasted:
+        st.session_state["pasted_image_dataurl"] = pasted
+
+
 # ------------------ DISPLAY CHAT ------------------
 
 for msg in st.session_state["messages"]:
@@ -125,14 +165,32 @@ if query:
         
     st.chat_message("user").markdown(query)
 
+    # Prefer pasted image over uploaded file; decode to bytes and show thumbnail
+    image_bytes = None
+    dataurl = st.session_state.get("pasted_image_dataurl") or None
+    if dataurl:
+        try:
+            header, encoded = dataurl.split(',', 1)
+            image_bytes = base64.b64decode(encoded)
+            st.image(image_bytes, caption="Pasted image", width=360)
+        except Exception:
+            image_bytes = None
+    elif uploaded_image is not None:
+        try:
+            image_bytes = uploaded_image.read()
+            st.image(image_bytes, caption="Uploaded image", width=360)
+        except Exception:
+            image_bytes = None
+
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # Stream the response
+            # Stream the response; include image bytes if provided for OCR
             result = st.write_stream(
                 message_chunk.content for message_chunk, metadata in chatbot.stream(
                     {
                         "messages": [HumanMessage(content=query)],
-                        "thread_title": st.session_state["chat_threads"].get(st.session_state["thread_id"],"New Chat")
+                        "thread_title": st.session_state["chat_threads"].get(st.session_state["thread_id"],"New Chat"),
+                        "image_bytes": image_bytes,
                     },
                     config=CONFIG,
                     stream_mode="messages"
