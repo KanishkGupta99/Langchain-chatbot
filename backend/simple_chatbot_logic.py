@@ -1,7 +1,11 @@
 from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage
-from typing import TypedDict, Annotated, NotRequired
+from typing import TypedDict, Annotated
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from langgraph.checkpoint.mongodb import MongoDBSaver
